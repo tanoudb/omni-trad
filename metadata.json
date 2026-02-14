@@ -1,0 +1,5 @@
+{
+  "name": "Omni Reader",
+  "description": "A high-performance vertical scroll document and webtoon reader with external source management and reading history.",
+  "requestFramePermissions": []
+}

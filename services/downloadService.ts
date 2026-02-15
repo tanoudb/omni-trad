@@ -16,49 +16,68 @@ const initDB = (): Promise<IDBDatabase> => {
   });
 };
 
-export const saveChapterOffline = async (seriesId: string, chapterId: string, imageUrls: string[]) => {
-  // CRITICAL: Fetch all external data BEFORE opening the IndexedDB transaction.
-  // IndexedDB transactions auto-commit if the event loop becomes empty.
+/**
+ * Sauvegarde physiquement un chapitre dans IndexedDB en stockant les Blobs.
+ * Supporte désormais les Blobs directs pour éviter les erreurs de fetch local.
+ */
+export const saveChapterOffline = async (seriesId: string, chapterId: string, resources: (string | Blob)[]) => {
+  console.log(`[STORAGE] Début de la persistance physique pour : ${chapterId} (${resources.length} items)`);
+  
   const blobs = await Promise.all(
-    imageUrls.map(async (url) => {
+    resources.map(async (item) => {
+      // Si c'est déjà un Blob (cas de l'import local), on l'utilise directement
+      if (item instanceof Blob) {
+        return item;
+      }
+      
+      // Si c'est une URL (cas de l'import distant), on la fetch
       try {
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`);
+        const resp = await fetch(item);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const blob = await resp.blob();
-        // For persistence across sessions in a browser, we should store the actual Blob 
-        // and only createObjectURL when reading. However, for simplicity in this demo environment:
+        if (blob.size === 0) throw new Error("Blob vide détecté");
         return blob;
       } catch (e) {
-        console.error(`Failed to fetch image: ${url}`, e);
+        console.error(`[STORAGE] Echec extraction ressource : ${item}`, e);
         return null;
       }
     })
   );
 
-  const validBlobs = blobs.filter(b => b !== null);
-  // Convert blobs to local URLs for storage (or store blobs directly if your browser supports it)
-  // Most modern browsers support storing Blobs directly in IndexedDB.
-  const imagesToStore = validBlobs.map(blob => URL.createObjectURL(blob));
+  const validBlobs = blobs.filter((b): b is Blob => b !== null && b.size > 0);
+  
+  if (validBlobs.length === 0) {
+    console.error("[STORAGE] Aucun blob valide n'a pu être extrait. Annulation de la sauvegarde pour " + chapterId);
+    return false;
+  }
 
   const db = await initDB();
   
   return new Promise((resolve, reject) => {
-    // Open transaction only when data is ready
     const tx = db.transaction(STORE_NAME, 'readwrite');
     const store = tx.objectStore(STORE_NAME);
     
     const request = store.put({ 
       id: `${seriesId}_${chapterId}`, 
-      images: imagesToStore, 
+      blobs: validBlobs, 
       timestamp: Date.now() 
     });
 
-    tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error);
+    tx.oncomplete = () => {
+      console.log(`[STORAGE] Succès : ${validBlobs.length} images stockées physiquement pour ${chapterId}.`);
+      resolve(true);
+    };
+    tx.onerror = () => {
+      console.error("[STORAGE] Erreur transaction IndexedDB :", tx.error);
+      reject(tx.error);
+    };
     request.onerror = () => reject(request.error);
   });
 };
 
+/**
+ * Récupère un chapitre extrait physiquement.
+ */
 export const getOfflineChapter = async (seriesId: string, chapterId: string): Promise<string[] | null> => {
   try {
     const db = await initDB();
@@ -67,11 +86,32 @@ export const getOfflineChapter = async (seriesId: string, chapterId: string): Pr
       const store = tx.objectStore(STORE_NAME);
       const request = store.get(`${seriesId}_${chapterId}`);
       
-      request.onsuccess = () => resolve(request.result?.images || null);
-      request.onerror = () => resolve(null);
+      request.onsuccess = () => {
+        const result = request.result;
+        if (!result || !result.blobs || result.blobs.length === 0) {
+          console.warn(`[STORAGE] Chapitre introuvable ou vide dans IndexedDB : ${chapterId}`);
+          resolve(null);
+          return;
+        }
+        
+        console.log(`[STORAGE] Hydratation de ${result.blobs.length} blobs pour ${chapterId}`);
+        const urls = result.blobs.map((blob: Blob) => {
+          if (!(blob instanceof Blob)) {
+            console.error("[STORAGE] L'objet récupéré n'est pas un Blob valide !");
+            return "";
+          }
+          return URL.createObjectURL(blob);
+        }).filter((u: string) => u !== "");
+        
+        resolve(urls);
+      };
+      request.onerror = () => {
+        console.error("[STORAGE] Erreur lors de la lecture IndexedDB");
+        resolve(null);
+      };
     });
   } catch (e) {
-    console.error("IndexedDB read error", e);
+    console.error("[STORAGE] Exception système IndexedDB :", e);
     return null;
   }
 };

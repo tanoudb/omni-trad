@@ -2,81 +2,56 @@
 import { Series, Source } from '../types';
 
 /**
- * Fetches all series from the provided sources.
+ * Récupère toutes les séries depuis les sources JSON configurées.
  */
 export const fetchAllFromSources = async (sources: Source[]): Promise<Series[]> => {
-  // Simulated delay
-  await new Promise(r => setTimeout(r, 600));
+  if (!sources || sources.length === 0) return [];
 
-  const demoData: Series[] = [
-    {
-      id: 'ser-1',
-      title: 'Solitary Necromancer',
-      author: 'Author A',
-      status: 'en_cours',
-      description: 'A thrilling story about a lone necromancer.',
-      coverUrl: 'https://picsum.photos/seed/manga1/400/600',
-      chapters: [
-        { 
-          id: 'ch-1', 
-          number: 1, 
-          title: 'Prologue: The Awakening', 
-          pages: [
-            'https://picsum.photos/seed/page1/800/1200',
-            'https://picsum.photos/seed/page2/800/1200',
-            'https://picsum.photos/seed/page3/800/1200',
-            'https://picsum.photos/seed/page4/800/1200'
-          ] 
-        },
-        { 
-          id: 'ch-2', 
-          number: 2, 
-          title: 'The Hidden Dungeon', 
-          pages: [
-            'https://picsum.photos/seed/page5/800/1200',
-            'https://picsum.photos/seed/page6/800/1200'
-          ] 
-        }
-      ]
-    },
-    {
-      id: 'ser-2',
-      title: 'The Max Level Hero Returns',
-      author: 'Author B',
-      status: 'termine',
-      description: 'A hero returns with max levels.',
-      coverUrl: 'https://picsum.photos/seed/manga2/400/600',
-      chapters: [
-        { id: 'ch-101', number: 1, title: 'Chapter 1: Regret', pages: ['https://picsum.photos/seed/page7/800/1200'] }
-      ]
-    },
-    {
-        id: 'ser-3',
-        title: 'Leveling Up with the Gods',
-        author: 'Author C',
-        status: 'en_cours',
-        description: 'Climbing the tower with ancient gods.',
-        coverUrl: 'https://picsum.photos/seed/manga3/400/600',
-        chapters: [
-          { id: 'ch-201', number: 1, title: 'Chapter 1: The Tower', pages: ['https://picsum.photos/seed/page8/800/1200'] }
-        ]
+  const allSeries: Series[] = [];
+  
+  for (const source of sources) {
+    try {
+      // On évite de fetch la source de démo par défaut si elle n'existe plus
+      if (source.id === 'default' && source.url.includes('githubusercontent')) continue;
+
+      const response = await fetch(source.url);
+      if (!response.ok) continue;
+      
+      const data = await response.json();
+      
+      // Support de différents formats de JSON (Array direct ou objet avec propriété 'series')
+      const seriesList = Array.isArray(data) ? data : (data.series || []);
+      
+      if (Array.isArray(seriesList)) {
+        allSeries.push(...seriesList.map((s: any) => ({
+          ...s,
+          sourceId: source.id
+        })));
+      }
+    } catch (e) {
+      console.error(`[SOURCE] Échec du chargement : ${source.name}`, e);
     }
-  ];
+  }
 
-  return demoData;
+  return allSeries;
 };
 
+/**
+ * Récupère les détails d'une série spécifique (Locale ou Distante).
+ */
 export const fetchMockSeriesData = async (seriesId: string): Promise<Series> => {
-    // Si c'est un item local, on le récupère dans le localStorage
-    if (seriesId.startsWith('local-')) {
-      const saved = localStorage.getItem('omni_local_items');
-      const locals: Series[] = saved ? JSON.parse(saved) : [];
-      const found = locals.find(s => s.id === seriesId);
-      if (found) return found;
-    }
+    // 1. Vérification dans les items locaux
+    const savedLocals = localStorage.getItem('omni_local_items');
+    const locals: Series[] = savedLocals ? JSON.parse(savedLocals) : [];
+    const localFound = locals.find(s => s.id === seriesId);
+    if (localFound) return localFound;
 
-    const all = await fetchAllFromSources([]);
-    const found = all.find(s => s.id === seriesId);
-    if (!found) throw new Error("Series not found");
-    return found;
+    // 2. Vérification dans les sources distantes configurées
+    const savedSources = localStorage.getItem('omni_sources');
+    const sources: Source[] = savedSources ? JSON.parse(savedSources) : [];
+    const allRemote = await fetchAllFromSources(sources);
+    const remoteFound = allRemote.find(s => s.id === seriesId);
+    
+    if (!remoteFound) throw new Error("Série introuvable ou source inaccessible");
+    return remoteFound;
 };

@@ -73,13 +73,21 @@ const SearchPage: React.FC<SearchPageProps> = ({ sources, favorites, onToggleFav
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
           {results.map(series => {
             const isFavorite = favorites.includes(series.id);
+            const firstChapterId = series.chapters?.[0]?.id;
+            
             return (
               <div key={series.id} className="flex flex-col group animate-in fade-in slide-in-from-bottom-2 duration-500">
                 <div className="relative aspect-[2/3] overflow-hidden rounded-3xl shadow-2xl transition-all duration-500 group-hover:scale-[1.03] group-hover:-translate-y-2">
-                  <Link to={`/reader/${series.id}/${series.chapters[0].id}`}>
-                    <img src={series.coverUrl} className="w-full h-full object-cover" alt={series.title} />
-                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent opacity-60"></div>
-                  </Link>
+                  {firstChapterId ? (
+                    <Link to={`/reader/${series.id}/${firstChapterId}`}>
+                      <img src={series.coverUrl} className="w-full h-full object-cover" alt={series.title} />
+                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent opacity-60"></div>
+                    </Link>
+                  ) : (
+                    <div className="w-full h-full relative">
+                      <img src={series.coverUrl} className="w-full h-full object-cover grayscale opacity-50" alt={series.title} />
+                    </div>
+                  )}
                   <button 
                     onClick={() => onToggleFavorite(series.id)}
                     className={`absolute top-3 right-3 p-2 rounded-xl backdrop-blur-md transition-all ${isFavorite ? 'bg-red-500 text-white' : 'bg-black/30 text-white opacity-0 group-hover:opacity-100'}`}

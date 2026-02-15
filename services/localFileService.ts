@@ -1,150 +1,109 @@
 
-import JSZip from 'jszip';
 import { Series, Chapter } from '../types';
+import { saveChapterOffline } from './downloadService';
 
 /**
- * Service pour la gestion du système de fichiers local avec tri naturel et extraction de métadonnées.
+ * Service de Scan de Dossiers Locaux (Natural Folder Engine v2.1)
  */
 export class LocalFileSystemProvider {
   private static collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
-  /**
-   * Génère une vignette basse résolution pour optimiser l'affichage de la bibliothèque.
-   */
   private static async generateThumbnail(url: string): Promise<string> {
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 300; // Taille suffisante pour une grille mobile/desktop
-        const scale = MAX_WIDTH / img.width;
+        const MAX_WIDTH = 400;
         canvas.width = MAX_WIDTH;
-        canvas.height = img.height * scale;
+        canvas.height = img.height * (MAX_WIDTH / img.width);
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = 'high';
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
           resolve(canvas.toDataURL('image/jpeg', 0.8));
         } else {
           resolve(url);
         }
       };
-      img.onerror = () => resolve(url);
       img.src = url;
     });
   }
 
   /**
-   * Scanne une liste de fichiers et les transforme en structure Series/Chapters avec tri naturel.
+   * Scanne une liste de fichiers et organise les chapitres par structure de dossiers unique.
    */
-  static async mapDirectoryToManga(files: FileList | File[] | Record<string, any>, sourceName: string): Promise<Series> {
+  static async scanLocalDirectory(files: FileList | File[], sourceName: string): Promise<Series> {
     const seriesId = `local-${Date.now()}`;
-    const chapterMap: Record<string, { number: number; pages: string[] }> = {};
-    
-    if (!(files instanceof FileList) && !(Array.isArray(files))) {
-        return this.processZipArborescence(files as any, sourceName, seriesId);
-    }
+    const chaptersMap: Record<string, { fileName: string; file: File }[]> = {};
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.avif'];
 
-    const filesArray = Array.isArray(files) ? files : Array.from(files as FileList);
-    const imageExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
+    const filesArray = Array.from(files);
 
+    // Groupement strict par chemin de dossier
     filesArray.forEach(file => {
-      const pathParts = file.webkitRelativePath.split('/');
       const lowerName = file.name.toLowerCase();
-      
       if (imageExtensions.some(ext => lowerName.endsWith(ext))) {
-        // Détection du chapitre : Dossier parent direct du fichier
-        const chapterName = pathParts.length > 2 ? pathParts[pathParts.length - 2] : "Chapitre 1";
+        // webkitRelativePath donne : "Parent/SousDossier/image.jpg"
+        const pathParts = file.webkitRelativePath.split('/');
+        pathParts.pop(); // Retire le nom du fichier
         
-        if (!chapterMap[chapterName]) {
-          chapterMap[chapterName] = { 
-            number: this.extractChapterNumber(chapterName), 
-            pages: [] 
-          };
+        // On crée une clé unique basée sur le chemin complet du dossier
+        const chapterPathKey = pathParts.join('/') || "Racine";
+
+        if (!chaptersMap[chapterPathKey]) {
+          chaptersMap[chapterPathKey] = [];
         }
-        chapterMap[chapterName].pages.push(URL.createObjectURL(file));
+        chaptersMap[chapterPathKey].push({ fileName: file.name, file });
       }
     });
 
-    return this.finalizeSeriesStructure(seriesId, sourceName, chapterMap);
-  }
+    // Tri des clés de dossiers de manière naturelle (1, 2, 10...)
+    const sortedChapterKeys = Object.keys(chaptersMap).sort(this.collator.compare);
+    const chapters: Chapter[] = [];
 
-  private static async processZipArborescence(zip: JSZip, sourceName: string, seriesId: string): Promise<Series> {
-    const chapterMap: Record<string, { number: number; pages: string[] }> = {};
-    const imageExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
-
-    const entries = Object.keys(zip.files);
+    if (sortedChapterKeys.length === 0) throw new Error("Aucune image trouvée.");
     
-    for (const path of entries) {
-      const entry = zip.files[path];
-      if (entry.dir) continue;
+    for (let i = 0; i < sortedChapterKeys.length; i++) {
+      const key = sortedChapterKeys[i];
+      const chapterFiles = chaptersMap[key]
+        .sort((a, b) => this.collator.compare(a.fileName, b.fileName))
+        .map(item => item.file);
 
-      const lowerPath = path.toLowerCase();
-      if (imageExtensions.some(ext => lowerPath.endsWith(ext))) {
-        const pathParts = path.split('/');
-        const chapterName = pathParts.length > 1 ? pathParts[pathParts.length - 2] : "Chapitre 1";
+      const chapterId = `${seriesId}-ch${i + 1}`;
+      
+      // Extraction du nom du dossier final
+      const folderParts = key.split('/');
+      const displayTitle = folderParts[folderParts.length - 1] || `Chapitre ${i + 1}`;
+      
+      await saveChapterOffline(seriesId, chapterId, chapterFiles);
 
-        if (!chapterMap[chapterName]) {
-          chapterMap[chapterName] = { 
-            number: this.extractChapterNumber(chapterName), 
-            pages: [] 
-          };
-        }
-
-        const blob = await entry.async('blob');
-        chapterMap[chapterName].pages.push(URL.createObjectURL(blob));
-      }
+      chapters.push({
+        id: chapterId,
+        number: i + 1,
+        title: displayTitle,
+        pages: [] 
+      });
     }
 
-    return this.finalizeSeriesStructure(seriesId, sourceName, chapterMap);
-  }
-
-  private static async finalizeSeriesStructure(id: string, title: string, chapterMap: Record<string, any>): Promise<Series> {
-    // Tri naturel des noms de chapitres
-    const sortedChapterNames = Object.keys(chapterMap).sort(this.collator.compare);
-
-    const chapters: Chapter[] = sortedChapterNames.map((name, index) => {
-      const data = chapterMap[name];
-      return {
-        id: `${id}-ch${index + 1}`,
-        number: data.number || index + 1,
-        title: name,
-        // Tri naturel des pages à l'intérieur du chapitre
-        pages: data.pages.sort(this.collator.compare)
-      };
-    });
-
-    if (chapters.length === 0) throw new Error("Aucune image valide trouvée.");
-
-    // Création de la vignette pour la couverture
-    const originalCover = chapters[0].pages[0];
-    const thumbnailCover = await this.generateThumbnail(originalCover);
+    // Génération de la miniature à partir de la première page du premier chapitre
+    const firstKey = sortedChapterKeys[0];
+    const firstImageFile = chaptersMap[firstKey][0].file;
+    const firstImageUrl = URL.createObjectURL(firstImageFile);
+    const coverUrl = await this.generateThumbnail(firstImageUrl);
+    URL.revokeObjectURL(firstImageUrl);
 
     return {
-      id,
-      title,
-      author: "Local Import",
+      id: seriesId,
+      title: sourceName,
+      author: "Import Local",
+      description: `${chapters.length} chapitres détectés via l'arborescence.`,
+      coverUrl,
+      chapters,
       status: 'termine',
-      isLocal: true,
-      description: `Collection locale importée : ${title}`,
-      coverUrl: thumbnailCover,
-      chapters
+      isLocal: true
     };
-  }
-
-  private static extractChapterNumber(name: string): number {
-    const match = name.match(/\d+/);
-    return match ? parseInt(match[0]) : 0;
   }
 }
 
 export const mapDirectoryToManga = async (files: FileList | File[], title: string): Promise<Series> => {
-    return LocalFileSystemProvider.mapDirectoryToManga(files, title);
-};
-
-export const processLocalFile = async (file: File): Promise<Series> => {
-  const zip = new JSZip();
-  const content = await zip.loadAsync(file);
-  return LocalFileSystemProvider.mapDirectoryToManga(content, file.name.replace(/\.[^/.]+$/, ""));
+  return LocalFileSystemProvider.scanLocalDirectory(files, title);
 };

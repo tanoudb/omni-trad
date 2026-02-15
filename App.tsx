@@ -4,13 +4,13 @@ import { HashRouter, Routes, Route } from 'react-router-dom';
 import { Source, ReadingHistory, Series } from './types';
 import VerticalReader from './components/VerticalReader';
 import MainScaffold from './components/MainScaffold';
+import LibrarySettings from './components/settings/LibrarySettings';
+import Onboarding from './components/Onboarding';
 
 const App: React.FC = () => {
   const [sources, setSources] = useState<Source[]>(() => {
     const saved = localStorage.getItem('omni_sources');
-    return saved ? JSON.parse(saved) : [
-      { id: 'default', name: 'Demo Catalog', url: 'https://raw.githubusercontent.com/md-faisal/manga-api/main/manga.json', lastUpdated: Date.now() }
-    ];
+    return saved ? JSON.parse(saved) : [];
   });
 
   const [localSeries, setLocalSeries] = useState<Series[]>(() => {
@@ -26,6 +26,10 @@ const App: React.FC = () => {
   const [favorites, setFavorites] = useState<string[]>(() => {
     const saved = localStorage.getItem('omni_favorites');
     return saved ? JSON.parse(saved) : [];
+  });
+
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    return !localStorage.getItem('omni_profile');
   });
 
   useEffect(() => {
@@ -77,18 +81,20 @@ const App: React.FC = () => {
   };
 
   const handleImportLocal = (series: Series) => {
-    // On conserve les métadonnées et la cover thumbnail dans le localStorage
-    // Les pages volumineuses sont stockées via IndexedDB dans le service d'importation
     const metaSeries = { 
       ...series, 
-      chapters: series.chapters.map(c => ({ ...c, pages: [] })) 
+      chapters: (series.chapters || []).map(c => ({ ...c, pages: [] })) 
     };
     setLocalSeries(prev => [metaSeries, ...prev]);
   };
 
+  if (showOnboarding) {
+    return <Onboarding onComplete={() => setShowOnboarding(false)} />;
+  }
+
   return (
     <HashRouter>
-      <div className="min-h-screen bg-[#050810] text-slate-100 flex flex-col font-sans selection:bg-blue-500/30">
+      <div className="min-h-screen bg-[#050810] text-slate-100 flex flex-col font-sans selection:bg-[#8ab4f8]/30">
         <Routes>
           <Route element={<MainScaffold 
             sources={sources} 
@@ -101,9 +107,10 @@ const App: React.FC = () => {
             localSeries={localSeries}
           />}>
             <Route path="/" element={<div />} />
-            <Route path="/search" element={<div />} />
+            <Route path="/browse" element={<div />} />
             <Route path="/history" element={<div />} />
             <Route path="/settings" element={<div />} />
+            <Route path="/settings/library" element={<LibrarySettings />} />
           </Route>
           <Route path="/reader/:seriesId/:chapterId" element={<VerticalReader onProgress={updateHistory} />} />
         </Routes>

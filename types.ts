@@ -22,6 +22,12 @@ export interface Series {
   chapters: Chapter[];
   status: SeriesStatus;
   isLocal?: boolean;
+  categories?: string[]; // IDs des catégories
+}
+
+export interface Category {
+  id: string;
+  name: string;
 }
 
 export interface ReadingHistory {
@@ -36,12 +42,16 @@ export interface Source {
   name: string;
   url: string;
   lastUpdated: number;
+  pkg?: string;
+  iconUrl?: string;
 }
 
-export interface AppState {
-  sources: Source[];
-  activeSeries: Series | null;
-  history: Record<string, ReadingHistory>;
-  readingTimeSeconds: number;
-  favorites: string[]; // List of series IDs
+export interface Extension {
+  name: string;
+  pkg: string;
+  version: string;
+  lang: string;
+  icon: string;
+  apk: string;
+  baseUrl?: string;
 }

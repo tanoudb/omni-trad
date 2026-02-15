@@ -4,42 +4,59 @@ import { ReadingHistory } from '../types';
 export interface UserProfile {
   username: string;
   avatarUrl: string;
-  totalReadingTime: string;
+  totalReadingTimeSeconds: number;
+  isGuest: boolean;
 }
 
-/**
- * Simulates an UPSERT into the 'reading_history' table in Supabase.
- */
+const PROFILE_KEY = 'omni_profile';
+
 export const syncReadingProgress = async (history: ReadingHistory) => {
-  console.log('[Supabase] UPSERT reading_history:', {
-    webtoon_id: history.seriesId,
-    chapter_id: history.chapterId,
-    scroll_percent: Math.round(history.scrollPosition),
-    last_read: new Date(history.lastRead).toISOString()
-  });
-  
-  // Persist locally for the demo app's reactivity
   const saved = localStorage.getItem('omni_history');
   const currentHistory = saved ? JSON.parse(saved) : {};
   currentHistory[history.seriesId] = history;
   localStorage.setItem('omni_history', JSON.stringify(currentHistory));
-
   return { success: true };
 };
 
 export const syncReadingTime = async (seconds: number) => {
-  console.log('[Supabase] Syncing total reading time...', seconds);
+  const profile = await getUserProfile();
+  profile.totalReadingTimeSeconds += seconds;
+  localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
 };
 
 export const getUserProfile = async (): Promise<UserProfile> => {
+  const saved = localStorage.getItem(PROFILE_KEY);
+  if (saved) return JSON.parse(saved);
+  
   return {
-    username: "Sung Jin-Woo",
-    avatarUrl: "https://api.dicebear.com/7.x/avataaars/svg?seed=Jinwoo",
-    totalReadingTime: "42h 15m"
+    username: "Invité",
+    avatarUrl: `https://api.dicebear.com/7.x/notionists/svg?seed=Guest&backgroundColor=b6e3f4`,
+    totalReadingTimeSeconds: 0,
+    isGuest: true
   };
 };
 
+export const saveUserProfile = async (username: string, isGuest: boolean = false) => {
+  const profile: UserProfile = {
+    username: username || "Invité",
+    avatarUrl: `https://api.dicebear.com/7.x/notionists/svg?seed=${username || 'Guest'}&backgroundColor=c0aede`,
+    totalReadingTimeSeconds: 0,
+    isGuest
+  };
+  localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+  return profile;
+};
+
+export const formatReadingTime = (seconds: number): string => {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0) return `${h}H ${m}M`;
+  return `${m}M`;
+};
+
 export const signOut = async () => {
-  console.log('[Supabase] Signing out...');
+  localStorage.removeItem(PROFILE_KEY);
+  // On vide aussi les autres données pour une déconnexion propre si nécessaire
+  // localStorage.clear(); // Optionnel : décommenter pour tout raser
   window.location.reload();
 };
